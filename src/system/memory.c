@@ -30,23 +30,6 @@
 #define MEMORY_ARENA_8          7
 #define MEMORY_ARENA_FG_BUCKET  8
 
-//!----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-//! Memory functions
-//! This is the only place where those are needed so lets keep them more or less private
-//!----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-extern unsigned int * pMEMAllocFromDefaultHeapEx;
-extern unsigned int * pMEMAllocFromDefaultHeap;
-extern unsigned int * pMEMFreeToDefaultHeap;
-
-extern int (* MEMGetBaseHeapHandle)(int mem_arena);
-extern unsigned int (* MEMGetAllocatableSizeForFrmHeapEx)(int heap, int align);
-extern void *(* MEMAllocFromFrmHeapEx)(int heap, unsigned int size, int align);
-extern void (* MEMFreeToFrmHeap)(int heap, int mode);
-extern void *(* MEMAllocFromExpHeapEx)(int heap, unsigned int size, int align);
-extern int (* MEMCreateExpHeapEx)(void* address, unsigned int size, unsigned short flags);
-extern void *(* MEMDestroyExpHeap)(int heap);
-extern void (* MEMFreeToExpHeap)(int heap, void* ptr);
-
 static int mem1_heap = -1;
 static int bucket_heap = -1;
 
