@@ -4,7 +4,7 @@
  * https://github.com/exjam/decaf-emu/tree/ios/src/libdecaf/src/ios/mcp
  *
  * This is a proof of concept, and shouldn't be used until it's cleaned up a bit.
- * Co-authored by QuarkTheAwesome, exjam and Maschell
+ * Co-authored by exjam, Maschell and QuarkTheAwesome
  *
  * Flow of calls:
  * - kernel loads system libraries, app rpx or user calls OSDynLoad
@@ -15,6 +15,7 @@
  * - each request routes here where we can do whatever
  */
 
+#include "logger.h"
 #include "ipc_types.h"
 
 typedef enum {
@@ -40,19 +41,74 @@ typedef struct {
     char name[0x40];
 
     unsigned char unk3[0x12D8 - 0x68];
-} __attribute__((packed)) MCPLoadFileRequest;
+} MCPLoadFileRequest;
 //sizeof(MCPLoadFileRequest) = 0x12D8
 
 int (*const real_MCP_LoadFile)(ipcmessage* msg) = (void*)0x0501CAA8 + 1; //+1 for thumb
+int (*const MCP_DoLoadFile)(const char* path, const char* path2, void* outputBuffer, u32 outLength, u32 pos, int* bytesRead, u32 unk) = (void*)0x05017248 + 1;
+int (*const MCP_UnknownStuff)(const char* path, u32 pos, void* outputBuffer, u32 outLength, u32 outLength2, u32 unk) = (void*)0x05014CAC + 1;
 
 int _MCP_LoadFile_patch(ipcmessage* msg) {
-    if (msg->ioctl.length_in > 0 /*TODO log this and verify it's 0x12D8*/) {
-        MCPLoadFileRequest* request = (MCPLoadFileRequest*)msg->ioctl.buffer_in;
-    /*  loader.elf tries this value first */
-        if (request->type == LOAD_FILE_CAFE_OS) {
-        /*  Your code here */
-        }
+    if (!msg->ioctl.buffer_in) {
+        log_printf("MCP_LoadFile: !msg->ioctl.buffer_in\n");
+        return -29;
+    }
+
+    if (msg->ioctl.length_in != 0x12D8) {
+        log_printf("MCP_LoadFile: Unexpected msg->ioctl.length_in = %u\n", msg->ioctl.length_in);
+        return -29;
+    }
+
+    if (!msg->ioctl.buffer_io) {
+        log_printf("MCP_LoadFile: !msg->ioctl.buffer_io\n");
+        return -29;
+    }
+
+    if (!msg->ioctl.length_io) {
+        log_printf("MCP_LoadFile: !msg->ioctl.length_io\n");
+        return -29;
     }
     
+    MCPLoadFileRequest* request = (MCPLoadFileRequest*)msg->ioctl.buffer_in;
+    log_printf("MCP_LoadFile: msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
+    log_printf("MCP_LoadFile: request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
+
+/*  NOTE: removed LOAD_FILE_CAFE_OS check, since FIXME struct definition appears wrong for MCPLoadFileRequest->type */
+    if (request->name[0] == '*') {
+        char path[0x40];
+
+        // Translate request->name to a path by replacing * with /
+        for (int i = 0; i < 0x40; ++i) {
+            if (request->name[i] == '*') {
+                path[i] = '/';
+            } else {
+                path[i] = request->name[i];
+            }
+        }
+
+        log_printf("MCP_LoadFile: Load custom path \"%s\"\n", path);
+
+    /*  TODO: If this fails, try last argument as 1 */
+        int bytesRead = 0;
+        int result = MCP_DoLoadFile(path, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos, &bytesRead, 0);
+        log_printf("MCP_LoadFile: MCP_DoLoadFile returned %d, bytesRead = %d\n", result, bytesRead);
+
+        if (result >= 0) {
+            if (!bytesRead) {
+                return 0;
+            }
+
+        /*  TODO: If this fails, try last argument as 1 */
+            result = MCP_UnknownStuff(path, request->pos, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
+            log_printf("MCP_LoadFile: MCP_UnknownStuff returned %d\n", result);
+
+            if (result < 0) {
+                return result;
+            } else {
+                return bytesRead;
+            }
+        }
+    }
+
     return real_MCP_LoadFile(msg);
 }
