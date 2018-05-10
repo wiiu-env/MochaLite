@@ -5,7 +5,7 @@
 #include "socket.h"
 #include "logger.h"
 
-#ifdef DEBUG_LOGGER
+#ifdef LOG_IP
 static int log_socket = 0;
 
 int log_init(unsigned int ipAddress)

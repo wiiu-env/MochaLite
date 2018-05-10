@@ -210,7 +210,11 @@ static int wupserver_thread(void *arg)
 		usleep(1000);
 	}
 
+#ifdef LOG_IP
+	log_init(LOG_IP);
+#else
     log_init(0xC0A8B203);
+#endif
 
 	//print(0, 0, "opened /dev/socket !");
 	usleep(5*1000*1000);

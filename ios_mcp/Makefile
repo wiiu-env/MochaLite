@@ -6,6 +6,10 @@ ifeq ($(filter $(DEVKITARM)/bin,$(PATH)),)
 export PATH:=$(DEVKITARM)/bin:$(PATH)
 endif
 
+ifneq ($(LOG_IP),)
+CFLAGS += -DLOG_IP=$(LOG_IP)
+endif
+
 CC = arm-none-eabi-gcc
 LINK = arm-none-eabi-gcc
 AS = arm-none-eabi-as
