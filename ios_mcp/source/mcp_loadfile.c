@@ -27,6 +27,8 @@ typedef enum {
     LOAD_FILE_SYS_DATA_CONTENT = 2,
     //Load from a system data title's code directory (0005001B-x)/content/%s
     LOAD_FILE_SYS_DATA_CODE = 3,
+
+    LOAD_FILE_FORCE_SIZE = 0xFFFFFFFF,
 } MCPFileType;
 
 typedef struct {
@@ -73,11 +75,11 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
     log_printf("MCP_LoadFile: msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
     log_printf("MCP_LoadFile: request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
 
-/*  NOTE: removed LOAD_FILE_CAFE_OS check, since FIXME struct definition appears wrong for MCPLoadFileRequest->type */
-    if (request->name[0] == '*') {
+    if (request->type == LOAD_FILE_CAFE_OS &&
+        request->name[0] == '*') {
         char path[0x40];
 
-        // Translate request->name to a path by replacing * with /
+    /*  Translate request->name to a path by replacing * with / */
         for (int i = 0; i < 0x40; ++i) {
             if (request->name[i] == '*') {
                 path[i] = '/';
