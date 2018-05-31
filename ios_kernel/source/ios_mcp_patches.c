@@ -56,6 +56,7 @@ void mcp_run_patches(u32 ios_elf_start)
     patch_table_entries(ios_elf_start, mcp_patches_table, patch_count);
 
     section_write_word(ios_elf_start, 0x050254D6, THUMB_BL(0x050254D6, MCP_LoadFile_patch));
+    section_write_word(ios_elf_start, 0x05025242, THUMB_BL(0x05025242, MCP_ioctl64_patch));
 
     // patch MCP syslogs
     //section_write_word(ios_elf_start, 0x05055438, ARM_B(0x05055438, 0x0503DCF8));

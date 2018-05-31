@@ -114,3 +114,10 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
 
     return real_MCP_LoadFile(msg);
 }
+
+int _MCP_ioctl64_patch(ipcmessage* msg) {
+    log_printf("Hi from ioctl 0x64! ipc: %08X\n", msg);
+
+/*  DO NOT RETURN 0, this affects the codepaths back in the native ARM code */
+    return 1;
+}
