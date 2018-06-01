@@ -1,4 +1,5 @@
 /* Patch for MCP_LoadFile (ioctl 0x53).
+ * Also adds a sibling ioctl, 0x64, that allows setting a custom path to a main RPX
  *
  * Reference for most of the types and whatever:
  * https://github.com/exjam/decaf-emu/tree/ios/src/libdecaf/src/ios/mcp
@@ -17,6 +18,7 @@
 
 #include "logger.h"
 #include "ipc_types.h"
+#include <string.h>
 
 typedef enum {
     //Load from the process's code directory (process title id)/code/%s
@@ -50,6 +52,10 @@ int (*const real_MCP_LoadFile)(ipcmessage* msg) = (void*)0x0501CAA8 + 1; //+1 fo
 int (*const MCP_DoLoadFile)(const char* path, const char* path2, void* outputBuffer, u32 outLength, u32 pos, int* bytesRead, u32 unk) = (void*)0x05017248 + 1;
 int (*const MCP_UnknownStuff)(const char* path, u32 pos, void* outputBuffer, u32 outLength, u32 outLength2, u32 unk) = (void*)0x05014CAC + 1;
 
+static bool replacerpx = false;
+static bool didrpxfirstchunk = false;
+static char rpxpath[0x280];
+
 int _MCP_LoadFile_patch(ipcmessage* msg) {
     if (!msg->ioctl.buffer_in) {
         log_printf("MCP_LoadFile: !msg->ioctl.buffer_in\n");
@@ -70,7 +76,7 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
         log_printf("MCP_LoadFile: !msg->ioctl.length_io\n");
         return -29;
     }
-    
+
     MCPLoadFileRequest* request = (MCPLoadFileRequest*)msg->ioctl.buffer_in;
     log_printf("MCP_LoadFile: msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
     log_printf("MCP_LoadFile: request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
@@ -110,14 +116,81 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
                 return bytesRead;
             }
         }
+/*  RPX replacement!
+    Only replace this chunk if:
+    - replacerpx is true (replace the next rpx to be loaded)
+    - this file is an rpx
+    and either of the following:
+    - we haven't read the first chunk yet
+    - this is not the first chunk
+
+    This set of conditions means that replacement will only occur the first time an RPX is read in.
+    If the first chunk is read a second time, this means that the first read has already finished.
+    We only want to replace the first read. */
+    } else if (replacerpx) {
+        char* extension = request->name + strlen(request->name) - 3;
+        if (extension[0] == 'r' &&
+            extension[1] == 'p' &&
+            extension[2] == 'x') {
+            if (!didrpxfirstchunk || request->pos > 0) {
+                log_printf("MCP_LoadFile: Custom RPX path \"%s\"\n", rpxpath);
+
+                int bytesRead = 0;
+                int result = MCP_DoLoadFile(rpxpath, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos, &bytesRead, 0);
+                log_printf("MCP_LoadFile: MCP_DoLoadFile returned %d, bytesRead = %d\n", result, bytesRead);
+
+                if (result >= 0) {
+                    if (!bytesRead) {
+                        return 0;
+                    }
+                    result = MCP_UnknownStuff(rpxpath, request->pos, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
+                    log_printf("MCP_LoadFile: MCP_UnknownStuff returned %d\n", result);
+
+                    if (result < 0) {
+                        return result;
+                    } else {
+                        if (request->pos == 0) {
+                        /*  Successfully read in first RPX chunk, set flag */
+                            didrpxfirstchunk = true;
+                        }
+                        return bytesRead;
+                    }
+                }
+            } else {
+            /*  This is the second time reading the first chunk of an rpx.
+                Therefore we have already replaced the rpx we were asked to. */
+                replacerpx = false;
+            }
+        }
     }
 
     return real_MCP_LoadFile(msg);
 }
 
+/*  RPX replacement! Call this ioctl to replace the next loaded RPX with an arbitrary path.
+    DO NOT RETURN 0, this affects the codepaths back in the IOSU code */
 int _MCP_ioctl64_patch(ipcmessage* msg) {
-    log_printf("Hi from ioctl 0x64! ipc: %08X\n", msg);
+    if (!msg->ioctl.buffer_in) {
+        log_printf("MCP_ioctl64: !msg->ioctl.buffer_in\n");
+        return -29;
+    }
 
-/*  DO NOT RETURN 0, this affects the codepaths back in the native ARM code */
+    if (!msg->ioctl.length_in) {
+        log_printf("MCP_ioctl64: !msg->ioctl.length_in");
+        return -29;
+    }
+
+    if (msg->ioctl.length_in > sizeof(rpxpath) - 1) {
+        log_printf("MCP_ioctl64: ioctl.length_in: %X > %X!", msg->ioctl.length_in, sizeof(rpxpath) - 1);
+        return -29;
+    }
+
+    strncpy(rpxpath, (const char*)msg->ioctl.buffer_in, sizeof(rpxpath) - 1);
+    rpxpath[sizeof(rpxpath) - 1] = '\0';
+
+    replacerpx = true;
+    didrpxfirstchunk = false;
+
+    log_printf("MCP_ioctl64: Will load %s for next title\n", rpxpath);
     return 1;
 }
