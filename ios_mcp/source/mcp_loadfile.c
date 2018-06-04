@@ -52,34 +52,27 @@ int (*const real_MCP_LoadFile)(ipcmessage* msg) = (void*)0x0501CAA8 + 1; //+1 fo
 int (*const MCP_DoLoadFile)(const char* path, const char* path2, void* outputBuffer, u32 outLength, u32 pos, int* bytesRead, u32 unk) = (void*)0x05017248 + 1;
 int (*const MCP_UnknownStuff)(const char* path, u32 pos, void* outputBuffer, u32 outLength, u32 outLength2, u32 unk) = (void*)0x05014CAC + 1;
 
+static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* request);
 static bool replacerpx = false;
 static bool didrpxfirstchunk = false;
 static char rpxpath[0x280];
 
+#define log(fmt, ...) log_printf("%s: " fmt, __FUNCTION__, __VA_ARGS__)
+#define FAIL_ON(cond, val) \
+    if (cond) { \
+        log(#cond " (%08X)", val); \
+        return -29; \
+    }
+
 int _MCP_LoadFile_patch(ipcmessage* msg) {
-    if (!msg->ioctl.buffer_in) {
-        log_printf("MCP_LoadFile: !msg->ioctl.buffer_in\n");
-        return -29;
-    }
-
-    if (msg->ioctl.length_in != 0x12D8) {
-        log_printf("MCP_LoadFile: Unexpected msg->ioctl.length_in = %u\n", msg->ioctl.length_in);
-        return -29;
-    }
-
-    if (!msg->ioctl.buffer_io) {
-        log_printf("MCP_LoadFile: !msg->ioctl.buffer_io\n");
-        return -29;
-    }
-
-    if (!msg->ioctl.length_io) {
-        log_printf("MCP_LoadFile: !msg->ioctl.length_io\n");
-        return -29;
-    }
+    FAIL_ON(!msg->ioctl.buffer_in, 0);
+    FAIL_ON(msg->ioctl.length_in != 0x12D8, msg->ioctl.length_in);
+    FAIL_ON(!msg->ioctl.buffer_io, 0);
+    FAIL_ON(!msg->ioctl.length_io, 0);
 
     MCPLoadFileRequest* request = (MCPLoadFileRequest*)msg->ioctl.buffer_in;
-    log_printf("MCP_LoadFile: msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
-    log_printf("MCP_LoadFile: request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
+    log("msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
+    log("request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
 
     if (request->type == LOAD_FILE_CAFE_OS &&
         request->name[0] == '*') {
@@ -94,67 +87,29 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
             }
         }
 
-        log_printf("MCP_LoadFile: Load custom path \"%s\"\n", path);
-
-    /*  TODO: If this fails, try last argument as 1 */
-        int bytesRead = 0;
-        int result = MCP_DoLoadFile(path, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos, &bytesRead, 0);
-        log_printf("MCP_LoadFile: MCP_DoLoadFile returned %d, bytesRead = %d\n", result, bytesRead);
-
-        if (result >= 0) {
-            if (!bytesRead) {
-                return 0;
-            }
-
-        /*  TODO: If this fails, try last argument as 1 */
-            result = MCP_UnknownStuff(path, request->pos, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
-            log_printf("MCP_LoadFile: MCP_UnknownStuff returned %d\n", result);
-
-            if (result < 0) {
-                return result;
-            } else {
-                return bytesRead;
-            }
-        }
-/*  RPX replacement!
-    Only replace this chunk if:
-    - replacerpx is true (replace the next rpx to be loaded)
-    - this file is an rpx
-    and either of the following:
-    - we haven't read the first chunk yet
-    - this is not the first chunk
-
-    This set of conditions means that replacement will only occur the first time an RPX is read in.
-    If the first chunk is read a second time, this means that the first read has already finished.
-    We only want to replace the first read. */
+        int result = MCP_LoadCustomFile(path, msg, request);
+        if (result >= 0) return result;
     } else if (replacerpx) {
+    /*  RPX replacement!
+        Only replace this chunk if:
+        - replacerpx is true (replace the next rpx to be loaded)
+        - this file is an rpx
+        and either of the following:
+        - we haven't read the first chunk yet
+        - this is not the first chunk
+
+        The goal here is only to replace an rpx once. Reading at pos = 0 signifies a
+        new rpx load - these conditions detect that. */
         char* extension = request->name + strlen(request->name) - 3;
         if (extension[0] == 'r' &&
             extension[1] == 'p' &&
             extension[2] == 'x') {
+
             if (!didrpxfirstchunk || request->pos > 0) {
-                log_printf("MCP_LoadFile: Custom RPX path \"%s\"\n", rpxpath);
-
-                int bytesRead = 0;
-                int result = MCP_DoLoadFile(rpxpath, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos, &bytesRead, 0);
-                log_printf("MCP_LoadFile: MCP_DoLoadFile returned %d, bytesRead = %d\n", result, bytesRead);
-
+                int result = MCP_LoadCustomFile(rpxpath, msg, request);
                 if (result >= 0) {
-                    if (!bytesRead) {
-                        return 0;
-                    }
-                    result = MCP_UnknownStuff(rpxpath, request->pos, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
-                    log_printf("MCP_LoadFile: MCP_UnknownStuff returned %d\n", result);
-
-                    if (result < 0) {
-                        return result;
-                    } else {
-                        if (request->pos == 0) {
-                        /*  Successfully read in first RPX chunk, set flag */
-                            didrpxfirstchunk = true;
-                        }
-                        return bytesRead;
-                    }
+                    if (request->pos == 0) didrpxfirstchunk = true;
+                    return result;
                 }
             } else {
             /*  This is the second time reading the first chunk of an rpx.
@@ -167,23 +122,41 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
     return real_MCP_LoadFile(msg);
 }
 
+static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* request) {
+    log("Load custom path \"%s\"\n", path);
+
+/*  TODO: If this fails, try last argument as 1 */
+    int bytesRead = 0;
+    int result = MCP_DoLoadFile(path, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos, &bytesRead, 0);
+    log("MCP_DoLoadFile returned %d, bytesRead = %d\n", result, bytesRead);
+
+    if (result >= 0) {
+        if (!bytesRead) {
+            return 0;
+        }
+
+    /*  TODO: If this fails, try last argument as 1 */
+        result = MCP_UnknownStuff(path, request->pos, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
+        log("MCP_UnknownStuff returned %d\n", result);
+
+        if (result >= 0) {
+            return bytesRead;
+        }
+    }
+    return result;
+}
+
 /*  RPX replacement! Call this ioctl to replace the next loaded RPX with an arbitrary path.
     DO NOT RETURN 0, this affects the codepaths back in the IOSU code */
-int _MCP_ioctl64_patch(ipcmessage* msg) {
-    if (!msg->ioctl.buffer_in) {
-        log_printf("MCP_ioctl64: !msg->ioctl.buffer_in\n");
-        return -29;
+int _MCP_ioctl100_patch(ipcmessage* msg) {
+/*  Give some method to detect this ioctl's prescence, even if the other args are bad */
+    if (msg->ioctl.buffer_io && msg->ioctl.length_io >= sizeof(u32)) {
+        *(u32*)msg->ioctl.buffer_io = 1;
     }
 
-    if (!msg->ioctl.length_in) {
-        log_printf("MCP_ioctl64: !msg->ioctl.length_in");
-        return -29;
-    }
-
-    if (msg->ioctl.length_in > sizeof(rpxpath) - 1) {
-        log_printf("MCP_ioctl64: ioctl.length_in: %X > %X!", msg->ioctl.length_in, sizeof(rpxpath) - 1);
-        return -29;
-    }
+    FAIL_ON(!msg->ioctl.buffer_in, 0);
+    FAIL_ON(!msg->ioctl.length_in, 0);
+    FAIL_ON(msg->ioctl.length_in > sizeof(rpxpath) - 1, msg->ioctl.length_in);
 
     strncpy(rpxpath, (const char*)msg->ioctl.buffer_in, sizeof(rpxpath) - 1);
     rpxpath[sizeof(rpxpath) - 1] = '\0';
@@ -191,6 +164,11 @@ int _MCP_ioctl64_patch(ipcmessage* msg) {
     replacerpx = true;
     didrpxfirstchunk = false;
 
-    log_printf("MCP_ioctl64: Will load %s for next title\n", rpxpath);
+    log("Will load %s for next title\n", rpxpath);
+
+/*  Signal that all went well */
+    if (msg->ioctl.buffer_io && msg->ioctl.length_io >= sizeof(u32)) {
+        *(u32*)msg->ioctl.buffer_io = 2;
+    }
     return 1;
 }
