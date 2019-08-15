@@ -18,6 +18,8 @@
 
 #include "logger.h"
 #include "ipc_types.h"
+#include "fsa.h"
+#include "svc.h"
 #include <string.h>
 
 typedef enum {
@@ -53,7 +55,7 @@ int (*const MCP_DoLoadFile)(const char* path, const char* path2, void* outputBuf
 int (*const MCP_UnknownStuff)(const char* path, u32 pos, void* outputBuffer, u32 outLength, u32 outLength2, u32 unk) = (void*)0x05014CAC + 1;
 
 static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* request);
-static bool replacerpx = false;
+static bool skipPPCSetup = false;
 static bool didrpxfirstchunk = false;
 static char rpxpath[0x280];
 
@@ -74,11 +76,11 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
     log("msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
     log("request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
 
-    if (request->type == LOAD_FILE_CAFE_OS &&
+    /*if (request->type == LOAD_FILE_CAFE_OS &&
         request->name[0] == '*') {
         char path[0x40];
 
-    /*  Translate request->name to a path by replacing * with / */
+        // Translate request->name to a path by replacing * with / 
         for (int i = 0; i < 0x40; ++i) {
             if (request->name[i] == '*') {
                 path[i] = '/';
@@ -89,46 +91,101 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
 
         int result = MCP_LoadCustomFile(path, msg, request);
         if (result >= 0) return result;
-    } else if (replacerpx) {
+    }*/
     /*  RPX replacement!
-        Only replace this chunk if:
-        - replacerpx is true (replace the next rpx to be loaded)
-        - this file is an rpx
-        and either of the following:
-        - we haven't read the first chunk yet
-        - this is not the first chunk
-
+      
         The goal here is only to replace an rpx once. Reading at pos = 0 signifies a
         new rpx load - these conditions detect that. */
-        char* extension = request->name + strlen(request->name) - 3;
-        if (extension[0] == 'r' &&
-            extension[1] == 'p' &&
-            extension[2] == 'x') {
+        
+    if (request->name[0] == 'm' &&
+        request->name[1] == 'e' &&
+        request->name[2] == 'n' &&
+        request->name[3] == '.' &&
+        request->name[4] == 'r' &&
+        request->name[5] == 'p' &&
+        request->name[6] == 'x'
+        && rpxpath[0] != 'd'
+        && !skipPPCSetup){
+            int fsa_h = svcOpen("/dev/fsa", 0);
+            FSA_Unmount(fsa_h, "/vol/storage_iosu_homebrew", 2);
+            FSA_Mount(fsa_h, "/dev/sdcard01", "/vol/storage_iosu_homebrew", 2, NULL, 0);
+            svcClose(fsa_h);
+            
+            char * f_path = "/vol/storage_iosu_homebrew/wiiu/payload.rpx";;
+            
+            int result = MCP_LoadCustomFile(f_path, msg, request);
+            
+            if (result >= 0) {                
+                return result;
+            }            
+        }else if (request->name[0] == 's' &&
+        request->name[1] == 'a' &&
+        request->name[2] == 'f' &&
+        request->name[3] == 'e' &&
+        request->name[4] == '.' &&
+        request->name[5] == 'r' &&
+        request->name[6] == 'p' &&
+        request->name[7] == 'x'){
+            
+        char * final_path = rpxpath;
+            
+        if(rpxpath[0] == '\0') {
+            final_path = "/vol/storage_iosu_homebrew/wiiu/apps/homebrew_launcher/homebrew_launcher.rpx";
+            if (request->pos == 0){
+                didrpxfirstchunk = false;
+            }
+        }
 
-            if (!didrpxfirstchunk || request->pos > 0) {
-                int result = MCP_LoadCustomFile(rpxpath, msg, request);
-                if (result >= 0) {
-                    if (request->pos == 0) didrpxfirstchunk = true;
-                    return result;
+        char* extension = request->name + strlen(request->name) - 4;
+        if( extension[0] == '.' &&
+            extension[1] == 'r' &&
+            extension[2] == 'p' &&
+            extension[3] == 'x') {
+             if(final_path != NULL){
+                if (!didrpxfirstchunk || request->pos > 0) {
+                    int fsa_h = svcOpen("/dev/fsa", 0);
+                    FSA_Unmount(fsa_h, "/vol/storage_iosu_homebrew", 2);
+                    FSA_Mount(fsa_h, "/dev/sdcard01", "/vol/storage_iosu_homebrew", 2, NULL, 0);
+                    svcClose(fsa_h);
+                    
+                    int result = MCP_LoadCustomFile(final_path, msg, request);
+                    
+                    rpxpath[0] = '\0';
+                    if (result >= 0) {
+                        if (request->pos == 0) didrpxfirstchunk = true;
+                        return result;
+                    }
                 }
-            } else {
-            /*  This is the second time reading the first chunk of an rpx.
-                Therefore we have already replaced the rpx we were asked to. */
-                replacerpx = false;
             }
         }
     }
-
+    if (rpxpath[0] == 'd' &&
+        rpxpath[1] == 'o' &&
+        rpxpath[2] == 'n' &&
+        rpxpath[3] == 'e'){
+        skipPPCSetup = true;
+        rpxpath[0] = '\0';
+    }
+    
+    
     return real_MCP_LoadFile(msg);
 }
 
 static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* request) {
     log("Load custom path \"%s\"\n", path);
-
-/*  TODO: If this fails, try last argument as 1 */
+    
+    int filesize = 0;
+    int fileoffset = 0;
+        
+    if(filesize > 0 && (request->pos + fileoffset >  filesize)){
+        return 0;
+    }
+    
+    /*  TODO: If this fails, try last argument as 1 */
     int bytesRead = 0;
-    int result = MCP_DoLoadFile(path, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos, &bytesRead, 0);
-    log("MCP_DoLoadFile returned %d, bytesRead = %d\n", result, bytesRead);
+    int result = MCP_DoLoadFile(path, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos + fileoffset, &bytesRead, 0);
+    log("MCP_DoLoadFile returned %d, bytesRead = %d pos %d \n", result, bytesRead, request->pos + fileoffset);
+    
 
     if (result >= 0) {
         if (!bytesRead) {
@@ -136,10 +193,13 @@ static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* r
         }
 
     /*  TODO: If this fails, try last argument as 1 */
-        result = MCP_UnknownStuff(path, request->pos, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
+        result = MCP_UnknownStuff(path, request->pos + fileoffset, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
         log("MCP_UnknownStuff returned %d\n", result);
 
         if (result >= 0) {
+            if(filesize > 0 && (bytesRead + request->pos > filesize)){
+                return filesize - request->pos;
+            }
             return bytesRead;
         }
     }
@@ -157,11 +217,11 @@ int _MCP_ioctl100_patch(ipcmessage* msg) {
     FAIL_ON(!msg->ioctl.buffer_in, 0);
     FAIL_ON(!msg->ioctl.length_in, 0);
     FAIL_ON(msg->ioctl.length_in > sizeof(rpxpath) - 1, msg->ioctl.length_in);
+    
+    memset(rpxpath,0,sizeof(rpxpath));
+    strncpy(rpxpath, (const char*)msg->ioctl.buffer_in, msg->ioctl.length_in);
+    //rpxpath[strlen(rpxpath)] = '\0';
 
-    strncpy(rpxpath, (const char*)msg->ioctl.buffer_in, sizeof(rpxpath) - 1);
-    rpxpath[sizeof(rpxpath) - 1] = '\0';
-
-    replacerpx = true;
     didrpxfirstchunk = false;
 
     log("Will load %s for next title\n", rpxpath);

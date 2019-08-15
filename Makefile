@@ -10,9 +10,9 @@ ifeq ($(strip $(DEVKITPRO)),)
 $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>devkitPRO")
 endif
 export PATH			:=	$(DEVKITPPC)/bin:$(PORTLIBS)/bin:$(PATH)
-export LIBOGC_INC	:=	$(DEVKITPRO)/libogc/include
-export LIBOGC_LIB	:=	$(DEVKITPRO)/libogc/lib/wii
 export PORTLIBS		:=	$(DEVKITPRO)/portlibs/ppc
+
+GCC_VER := $(shell $(DEVKITPPC)/bin/powerpc-eabi-gcc -dumpversion)
 
 PREFIX	:=	powerpc-eabi-
 
@@ -28,14 +28,11 @@ export OBJCOPY	:=	$(PREFIX)objcopy
 # SOURCES is a list of directories containing source code
 # INCLUDES is a list of directories containing extra header files
 #---------------------------------------------------------------------------------
-TARGET		:=	mocha
+TARGET		:=	payload
 BUILD		:=	build
 BUILD_DBG	:=	$(TARGET)_dbg
-SOURCES		:=	src \
-				src/dynamic_libs \
-				src/fs \
-				src/system \
-				src/utils
+SOURCES		:=	src 
+
 DATA		:=	data
 
 INCLUDES	:=  src
@@ -43,12 +40,12 @@ INCLUDES	:=  src
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-CFLAGS	:=  -std=gnu11 -mrvl -mcpu=750 -meabi -mhard-float -ffast-math \
+CFLAGS	:=  -std=gnu11 -mcpu=750 -meabi -mhard-float -ffast-math \
 		    -O3 -Wall -Wextra -Wno-unused-parameter -Wno-strict-aliasing $(INCLUDE)
-CXXFLAGS := -std=gnu++11 -mrvl -mcpu=750 -meabi -mhard-float -ffast-math \
+CXXFLAGS := -std=gnu++11 -mcpu=750 -meabi -mhard-float -ffast-math \
 		    -O3 -Wall -Wextra -Wno-unused-parameter -Wno-strict-aliasing $(INCLUDE)
 ASFLAGS	:= -mregnames
-LDFLAGS	:= -nostartfiles -Wl,-Map,$(notdir $@).map,-wrap,malloc,-wrap,free,-wrap,memalign,-wrap,calloc,-wrap,realloc,-wrap,malloc_usable_size,-wrap,_malloc_r,-wrap,_free_r,-wrap,_realloc_r,-wrap,_calloc_r,-wrap,_memalign_r,-wrap,_malloc_usable_size_r,-wrap,valloc,-wrap,_valloc_r,-wrap,_pvalloc_r,--gc-sections
+LDFLAGS	:= -nostartfiles -Wl,--gc-sections
 
 #---------------------------------------------------------------------------------
 Q := @
@@ -56,7 +53,7 @@ MAKEFLAGS += --no-print-directory
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-LIBS	:= -ldynamiclibs
+LIBS	:= 
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -64,7 +61,7 @@ LIBS	:= -ldynamiclibs
 #---------------------------------------------------------------------------------
 LIBDIRS	:=	$(CURDIR)	\
 			$(DEVKITPPC)/lib  \
-			$(DEVKITPPC)/lib/gcc/powerpc-eabi/4.8.2
+			$(DEVKITPPC)/lib/gcc/powerpc-eabi/$(GCC_VER)
 
 
 #---------------------------------------------------------------------------------
@@ -123,23 +120,14 @@ $(BUILD): $(CURDIR)/ios_kernel/ios_kernel.bin.h
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
-$(CURDIR)/ios_kernel/ios_kernel.bin.h: $(CURDIR)/ios_usb/ios_usb.bin.h $(CURDIR)/ios_mcp/ios_mcp.bin.h $(CURDIR)/ios_fs/ios_fs.bin.h $(CURDIR)/ios_bsp/ios_bsp.bin.h $(CURDIR)/ios_acp/ios_acp.bin.h 
+$(CURDIR)/ios_kernel/ios_kernel.bin.h: $(CURDIR)/ios_usb/ios_usb.bin.h $(CURDIR)/ios_mcp/ios_mcp.bin.h
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_kernel -f  $(CURDIR)/ios_kernel/Makefile
 
 $(CURDIR)/ios_usb/ios_usb.bin.h:
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_usb -f  $(CURDIR)/ios_usb/Makefile
 
-$(CURDIR)/ios_fs/ios_fs.bin.h:
-	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_fs -f  $(CURDIR)/ios_fs/Makefile
-
-$(CURDIR)/ios_bsp/ios_bsp.bin.h:
-	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_bsp -f  $(CURDIR)/ios_bsp/Makefile
-
 $(CURDIR)/ios_mcp/ios_mcp.bin.h:
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_mcp -f  $(CURDIR)/ios_mcp/Makefile
-	
-$(CURDIR)/ios_acp/ios_acp.bin.h:
-	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_acp -f  $(CURDIR)/ios_acp/Makefile
 
 #---------------------------------------------------------------------------------
 clean:
@@ -147,10 +135,7 @@ clean:
 	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).bin $(BUILD_DBG).elf
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_kernel -f  $(CURDIR)/ios_kernel/Makefile clean
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_usb -f  $(CURDIR)/ios_usb/Makefile clean
-	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_fs -f  $(CURDIR)/ios_fs/Makefile clean
-	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_bsp -f  $(CURDIR)/ios_bsp/Makefile clean
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_mcp -f  $(CURDIR)/ios_mcp/Makefile clean
-	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_acp -f  $(CURDIR)/ios_acp/Makefile clean
 
 
 #---------------------------------------------------------------------------------

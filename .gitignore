@@ -1,4 +1,5 @@
 /*.elf
+/*.cbp
 /build
 /ios_bsp/build
 /ios_bsp/ios_bsp.bin.h
@@ -30,3 +31,4 @@
 /ios_acp/ios_acp.bin.h
 /ios_acp/*.elf
 /ios_acp/ios_acp_syms.h
+*.rpx

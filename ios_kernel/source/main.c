@@ -22,19 +22,11 @@
  * distribution.
  ***************************************************************************/
 #include "types.h"
-#include "config.h"
 #include "utils.h"
-#include "redirection_setup.h"
 #include "ios_mcp_patches.h"
-#include "ios_acp_patches.h"
-#include "ios_fs_patches.h"
-#include "ios_bsp_patches.h"
 #include "instant_patches.h"
 
 #define USB_PHYS_CODE_BASE      0x101312D0
-
-cfw_config_t cfw_config;
-
 typedef struct
 {
     u32 size;
@@ -91,34 +83,15 @@ int _main()
 
 	void * pusb_root_thread = (void*)0x10100174;
 	kernel_memcpy(pusb_root_thread, (void*)repairData_usb_root_thread, sizeof(repairData_usb_root_thread));
-
+    
     payload_info_t *payloads = (payload_info_t*)0x00148000;
 
-	kernel_memcpy((void*)&cfw_config, payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-
 	kernel_memcpy((void*)USB_PHYS_CODE_BASE, payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-
-    kernel_memcpy((void*)fs_get_phys_code_base(), payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-
-    if(cfw_config.redNAND && cfw_config.seeprom_red)
-        kernel_memcpy((void*)bsp_get_phys_code_base(), payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-
-	kernel_memcpy((void*)acp_get_phys_code_base(), payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
+    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );  
 
 	kernel_memcpy((void*)mcp_get_phys_code_base(), payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-
-    if(cfw_config.launchImage)
-    {
-	    kernel_memcpy((void*)MCP_LAUNCH_IMG_PHYS_ADDR, payloads->data, payloads->size);
-        payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-    }
-
+	payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
+    
     // run all instant patches as necessary
     instant_patches_setup();
 
@@ -131,11 +104,6 @@ int _main()
 	invalidate_icache();
 
 	enable_interrupts(level);
-
-    if(cfw_config.redNAND)
-    {
-	    redirection_setup();
-    }
 
 	return 0;
 }

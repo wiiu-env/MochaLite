@@ -25,13 +25,9 @@
 #include "../../common/kernel_commands.h"
 #include "elf_patcher.h"
 #include "ios_mcp_patches.h"
-#include "ios_acp_patches.h"
-#include "ios_fs_patches.h"
-#include "ios_bsp_patches.h"
 #include "kernel_patches.h"
 #include "exception_handler.h"
 #include "fsa.h"
-#include "config.h"
 #include "utils.h"
 
 extern void __KERNEL_CODE_START(void);
@@ -39,8 +35,6 @@ extern void __KERNEL_CODE_END(void);
 
 extern const patch_table_t kernel_patches_table[];
 extern const patch_table_t kernel_patches_table_end[];
-
-static u8 otp_buffer[0x400];
 
 static const u32 mcpIoMappings_patch[] =
 {
@@ -76,44 +70,12 @@ static int kernel_syscall_0x81(u32 command, u32 arg1, u32 arg2, u32 arg3)
         kernel_memcpy((void*)arg1, (void*) arg2, arg3);
         break;
     }
-    case KERNEL_GET_CFW_CONFIG:
-    {
-        //set_domain_register(0xFFFFFFFF);
-        kernel_memcpy((void*)arg1, &cfw_config, sizeof(cfw_config));
-        break;
-    }
     default:
         return -1;
     }
     return 0;
 }
 
-static int kernel_read_otp_internal(int index, void* out_buf, u32 size)
-{
-    kernel_memcpy(out_buf, otp_buffer + (index << 2), size);
-    return 0;
-}
-
-int kernel_init_otp_buffer(u32 sd_sector, int dumpFound)
-{
-    int res;
-
-    if(dumpFound)
-    {
-        res = FSA_SDReadRawSectors(otp_buffer, sd_sector, 2);
-    }
-    else
-    {
-        int (*orig_kernel_read_otp_internal)(int index, void* out_buf, u32 size) = (void*)0x08120248;
-        res = orig_kernel_read_otp_internal(0, otp_buffer, 0x400);
-    }
-
-    if((res == 0) && (dumpFound == 0))
-    {
-        FSA_SDWriteRawSectors(otp_buffer, sd_sector, 2);
-    }
-    return res;
-}
 
 void kernel_launch_ios(u32 launch_address, u32 L, u32 C, u32 H)
 {
@@ -128,12 +90,7 @@ void kernel_launch_ios(u32 launch_address, u32 L, u32 C, u32 H)
 
         //! try to keep the order of virt. addresses to reduce the memmove amount
         mcp_run_patches(ios_elf_start);
-        kernel_run_patches(ios_elf_start);
-        fs_run_patches(ios_elf_start);
-        //acp_run_patches(ios_elf_start);
-
-        if(cfw_config.redNAND && cfw_config.seeprom_red)
-            bsp_run_patches(ios_elf_start);
+        kernel_run_patches(ios_elf_start);   
 
         restore_mmu(control_register);
         enable_interrupts(level);
@@ -154,12 +111,6 @@ void kernel_run_patches(u32 ios_elf_start)
     section_write_word(ios_elf_start, 0x08129E50, ARM_BL(0x08129E50, crash_handler_undef_instr));
 
     section_write_word(ios_elf_start, 0x0812CD2C, ARM_B(0x0812CD2C, kernel_syscall_0x81));
-
-    if(cfw_config.redNAND && cfw_config.otp_red)
-    {
-        section_write(ios_elf_start, (u32)otp_buffer, otp_buffer, 0x400);
-        section_write_word(ios_elf_start, 0x08120248, ARM_B(0x08120248, kernel_read_otp_internal));
-    }
 
     u32 patch_count = (u32)(((u8*)kernel_patches_table_end) - ((u8*)kernel_patches_table)) / sizeof(patch_table_t);
     patch_table_entries(ios_elf_start, kernel_patches_table, patch_count);

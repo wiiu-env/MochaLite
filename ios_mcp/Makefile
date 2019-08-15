@@ -6,6 +6,8 @@ ifeq ($(filter $(DEVKITARM)/bin,$(PATH)),)
 export PATH:=$(DEVKITARM)/bin:$(PATH)
 endif
 
+LOG_IP = 0xc0a800ea
+
 ifneq ($(LOG_IP),)
 CFLAGS += -DLOG_IP=$(LOG_IP)
 endif

@@ -8,11 +8,11 @@
 #ifdef LOG_IP
 static int log_socket = 0;
 
-int log_init(unsigned int ipAddress)
-{
+int log_init(unsigned int ipAddress){
 	log_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (log_socket < 0)
+	if (log_socket < 0){
 		return log_socket;
+    }
 
 	struct sockaddr_in connect_addr;
 	memset(&connect_addr, 0, sizeof(connect_addr));
@@ -40,6 +40,9 @@ void log_deinit()
 
 static void log_print(const char *str, int len)
 {
+    if(log_socket < 0) {
+        return;
+    }
     int ret;
     while (len > 0) {
         int block = len < 1400 ? len : 1400; // take max 1400 bytes per UDP packet
