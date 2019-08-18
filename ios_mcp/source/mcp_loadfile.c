@@ -111,7 +111,7 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
             FSA_Mount(fsa_h, "/dev/sdcard01", "/vol/storage_iosu_homebrew", 2, NULL, 0);
             svcClose(fsa_h);
             
-            char * f_path = "/vol/storage_iosu_homebrew/wiiu/payload.rpx";;
+            char * f_path = "/vol/storage_iosu_homebrew/wiiu/root.rpx";;
             
             int result = MCP_LoadCustomFile(f_path, msg, request);
             
