@@ -70,12 +70,17 @@ static int kernel_syscall_0x81(u32 command, u32 arg1, u32 arg2, u32 arg3)
         kernel_memcpy((void*)arg1, (void*) arg2, arg3);
         break;
     }
+    case KERNEL_GET_CFW_CONFIG:
+    {
+        //set_domain_register(0xFFFFFFFF);
+        //kernel_memcpy((void*)arg1, &cfw_config, sizeof(cfw_config));
+        break;
+    }
     default:
         return -1;
     }
     return 0;
 }
-
 
 void kernel_launch_ios(u32 launch_address, u32 L, u32 C, u32 H)
 {

@@ -1,5 +1,4 @@
 .extern _MCP_LoadFile_patch
-
 .global MCP_LoadFile_patch
 MCP_LoadFile_patch:
     .thumb
@@ -10,7 +9,6 @@ MCP_LoadFile_patch:
     bx r12
 
 .extern _MCP_ioctl100_patch
-
 .global MCP_ioctl100_patch
 MCP_ioctl100_patch:
     .thumb

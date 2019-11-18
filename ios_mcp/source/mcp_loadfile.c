@@ -18,46 +18,23 @@
 
 #include "logger.h"
 #include "ipc_types.h"
+#include "../../common/ipc_defs.h"
 #include "fsa.h"
 #include "svc.h"
 #include <string.h>
 
-typedef enum {
-    //Load from the process's code directory (process title id)/code/%s
-    LOAD_FILE_PROCESS_CODE = 0,
-    //Load from the CafeOS directory (00050010-1000400A)/code/%s
-    LOAD_FILE_CAFE_OS = 1,
-    //Load from a system data title's content directory (0005001B-x)/content/%s
-    LOAD_FILE_SYS_DATA_CONTENT = 2,
-    //Load from a system data title's code directory (0005001B-x)/content/%s
-    LOAD_FILE_SYS_DATA_CODE = 3,
-
-    LOAD_FILE_FORCE_SIZE = 0xFFFFFFFF,
-} MCPFileType;
-
-typedef struct {
-    unsigned char unk[0x10];
-
-    unsigned int pos;
-    MCPFileType type;
-    unsigned int cafe_pid;
-
-    unsigned char unk2[0xC];
-
-    char name[0x40];
-
-    unsigned char unk3[0x12D8 - 0x68];
-} MCPLoadFileRequest;
-//sizeof(MCPLoadFileRequest) = 0x12D8
-
 int (*const real_MCP_LoadFile)(ipcmessage* msg) = (void*)0x0501CAA8 + 1; //+1 for thumb
-int (*const MCP_DoLoadFile)(const char* path, const char* path2, void* outputBuffer, u32 outLength, u32 pos, int* bytesRead, u32 unk) = (void*)0x05017248 + 1;
-int (*const MCP_UnknownStuff)(const char* path, u32 pos, void* outputBuffer, u32 outLength, u32 outLength2, u32 unk) = (void*)0x05014CAC + 1;
+int (*const MCP_DoLoadFile)(const char* path, const char* path2, void* outputBuffer, uint32_t outLength, uint32_t pos, int* bytesRead, uint32_t unk) = (void*)0x05017248 + 1;
+int (*const MCP_UnknownStuff)(const char* path, uint32_t pos, void* outputBuffer, uint32_t outLength, uint32_t outLength2, uint32_t unk) = (void*)0x05014CAC + 1;
 
-static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* request);
+static int MCP_LoadCustomFile(int target, char* path, int filesize, int fileoffset, void * out_buffer, int buffer_len, int pos);
 static bool skipPPCSetup = false;
 static bool didrpxfirstchunk = false;
-static char rpxpath[0x280];
+static bool doWantReplaceRPX = false;
+static bool replace_target_device = 0;
+static bool rep_filesize = 0;
+static bool rep_fileoffset = 0;
+static char rpxpath[256];
 
 #define log(fmt, ...) log_printf("%s: " fmt, __FUNCTION__, __VA_ARGS__)
 #define FAIL_ON(cond, val) \
@@ -67,138 +44,121 @@ static char rpxpath[0x280];
     }
 
 int _MCP_LoadFile_patch(ipcmessage* msg) {
+
     FAIL_ON(!msg->ioctl.buffer_in, 0);
     FAIL_ON(msg->ioctl.length_in != 0x12D8, msg->ioctl.length_in);
     FAIL_ON(!msg->ioctl.buffer_io, 0);
     FAIL_ON(!msg->ioctl.length_io, 0);
 
     MCPLoadFileRequest* request = (MCPLoadFileRequest*)msg->ioctl.buffer_in;
-    log("msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
-    log("request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
 
-    /*if (request->type == LOAD_FILE_CAFE_OS &&
-        request->name[0] == '*') {
-        char path[0x40];
+    //dumpHex(request, sizeof(MCPLoadFileRequest));
+    //DEBUG_FUNCTION_LINE("msg->ioctl.buffer_io = %p, msg->ioctl.length_io = 0x%X\n", msg->ioctl.buffer_io, msg->ioctl.length_io);
+    //DEBUG_FUNCTION_LINE("request->type = %d, request->pos = %d, request->name = \"%s\"\n", request->type, request->pos, request->name);
 
-        // Translate request->name to a path by replacing * with / 
-        for (int i = 0; i < 0x40; ++i) {
-            if (request->name[i] == '*') {
-                path[i] = '/';
-            } else {
-                path[i] = request->name[i];
-            }
+    int replace_target = replace_target_device;
+    int replace_filesize = rep_filesize;
+    int replace_fileoffset = rep_fileoffset;
+    char * replace_path = rpxpath;
+
+    if(strncmp(request->name, "men.rpx", strlen("men.rpx")) == 0 && !skipPPCSetup) {
+        // At startup we want to hook into the Wii U Menu by replacing the men.rpx with a file from the SD Card
+        // The replacement may restart the application to execute a kernel exploit.
+        // The men.rpx is hooked until the "IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED" command is passed to IOCTL 0x100.
+        // If the loading of the replacement file fails, the Wii U Menu is loaded normally.
+        replace_target = LOAD_FILE_TARGET_SD_CARD;
+        replace_path = "wiiu/root.rpx";
+
+        int result = MCP_LoadCustomFile(replace_target, replace_path, 0, 0, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos);
+
+        if (result >= 0) {
+            return result;
+        } else {
+            // on error don't try it again.
+            skipPPCSetup = true;
+        }
+    } else if(strncmp(request->name, "safe.rpx", strlen("safe.rpx")) == 0) {
+        if (request->pos == 0) {
+            didrpxfirstchunk = false;
         }
 
-        int result = MCP_LoadCustomFile(path, msg, request);
-        if (result >= 0) return result;
-    }*/
-    /*  RPX replacement!
-      
-        The goal here is only to replace an rpx once. Reading at pos = 0 signifies a
-        new rpx load - these conditions detect that. */
-        
-    if (request->name[0] == 'm' &&
-        request->name[1] == 'e' &&
-        request->name[2] == 'n' &&
-        request->name[3] == '.' &&
-        request->name[4] == 'r' &&
-        request->name[5] == 'p' &&
-        request->name[6] == 'x'
-        && rpxpath[0] != 'd'
-        && !skipPPCSetup){
-            int fsa_h = svcOpen("/dev/fsa", 0);
-            FSA_Unmount(fsa_h, "/vol/storage_iosu_homebrew", 2);
-            FSA_Mount(fsa_h, "/dev/sdcard01", "/vol/storage_iosu_homebrew", 2, NULL, 0);
-            svcClose(fsa_h);
-            
-            char * f_path = "/vol/storage_iosu_homebrew/wiiu/root.rpx";;
-            
-            int result = MCP_LoadCustomFile(f_path, msg, request);
-            
-            if (result >= 0) {                
-                return result;
-            }            
-        }else if (request->name[0] == 's' &&
-        request->name[1] == 'a' &&
-        request->name[2] == 'f' &&
-        request->name[3] == 'e' &&
-        request->name[4] == '.' &&
-        request->name[5] == 'r' &&
-        request->name[6] == 'p' &&
-        request->name[7] == 'x'){
-            
-        char * final_path = rpxpath;
-            
-        if(rpxpath[0] == '\0') {
-            final_path = "/vol/storage_iosu_homebrew/wiiu/apps/homebrew_launcher/homebrew_launcher.rpx";
-            if (request->pos == 0){
-                didrpxfirstchunk = false;
-            }
+        // if we don't explicitly replace files, we do want replace the Healt and Safety app with the HBL
+        if(!doWantReplaceRPX) {
+            replace_path = "wiiu/apps/homebrew_launcher/homebrew_launcher.rpx";
+            replace_target = LOAD_FILE_TARGET_SD_CARD;
+            //doWantReplaceXML = false;
+            doWantReplaceRPX = true;
+            replace_filesize = 0; // unknown
+            replace_fileoffset = 0;
         }
+    }
 
-        char* extension = request->name + strlen(request->name) - 4;
-        if( extension[0] == '.' &&
-            extension[1] == 'r' &&
-            extension[2] == 'p' &&
-            extension[3] == 'x') {
-             if(final_path != NULL){
-                if (!didrpxfirstchunk || request->pos > 0) {
-                    int fsa_h = svcOpen("/dev/fsa", 0);
-                    FSA_Unmount(fsa_h, "/vol/storage_iosu_homebrew", 2);
-                    FSA_Mount(fsa_h, "/dev/sdcard01", "/vol/storage_iosu_homebrew", 2, NULL, 0);
-                    svcClose(fsa_h);
-                    
-                    int result = MCP_LoadCustomFile(final_path, msg, request);
-                    
-                    rpxpath[0] = '\0';
-                    if (result >= 0) {
-                        if (request->pos == 0) didrpxfirstchunk = true;
-                        return result;
-                    }
+    if(replace_path != NULL && strlen(replace_path) > 0) {
+        if (!didrpxfirstchunk || request->pos > 0) {
+            doWantReplaceRPX = false; // Only replace it once.
+            int result = MCP_LoadCustomFile(replace_target, replace_path, replace_filesize, replace_fileoffset, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos);
+
+            if (result >= 0) {
+                if (request->pos == 0) {
+                    didrpxfirstchunk = true;
                 }
+                return result;
+            } else {
+                // TODO, what happens if we already replaced the app/cos xml files and then the loading fails?
             }
         }
     }
-    if (rpxpath[0] == 'd' &&
-        rpxpath[1] == 'o' &&
-        rpxpath[2] == 'n' &&
-        rpxpath[3] == 'e'){
-        skipPPCSetup = true;
-        rpxpath[0] = '\0';
-    }
-    
-    
+
     return real_MCP_LoadFile(msg);
 }
 
-static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* request) {
-    log("Load custom path \"%s\"\n", path);
-    
-    int filesize = 0;
-    int fileoffset = 0;
-        
-    if(filesize > 0 && (request->pos + fileoffset >  filesize)){
+
+// Set filesize to 0 if unknown.
+static int MCP_LoadCustomFile(int target, char* path, int filesize, int fileoffset, void * buffer_out, int buffer_len, int pos) {
+    if(path == NULL) {
         return 0;
     }
-    
+
+
+    char filepath[256];
+    memset(filepath,0,sizeof(filepath));
+    strncpy(filepath, path, sizeof(filepath) -1);
+
+    if(target == LOAD_FILE_TARGET_SD_CARD) {
+        char mountpath[] = "/vol/storage_iosu_homebrew";
+        int fsa_h = svcOpen("/dev/fsa", 0);
+        FSA_Mount(fsa_h, "/dev/sdcard01", mountpath, 2, NULL, 0);
+        svcClose(fsa_h);
+        strncpy(filepath,mountpath,sizeof(filepath) -1);
+        strncat(filepath,"/",(sizeof(filepath) - 1) - strlen(filepath));
+        strncat(filepath,path,(sizeof(filepath) - 1) - strlen(filepath));
+    }
+
+
+    DEBUG_FUNCTION_LINE("Load custom path \"%s\"\n", filepath);
+
+    if(filesize > 0 && (pos + fileoffset >  filesize)) {
+        return 0;
+    }
+
     /*  TODO: If this fails, try last argument as 1 */
     int bytesRead = 0;
-    int result = MCP_DoLoadFile(path, NULL, msg->ioctl.buffer_io, msg->ioctl.length_io, request->pos + fileoffset, &bytesRead, 0);
-    log("MCP_DoLoadFile returned %d, bytesRead = %d pos %d \n", result, bytesRead, request->pos + fileoffset);
-    
+    int result = MCP_DoLoadFile(filepath, NULL, buffer_out, buffer_len, pos + fileoffset, &bytesRead, 0);
+    //log("MCP_DoLoadFile returned %d, bytesRead = %d pos %d \n", result, bytesRead, pos + fileoffset);
+
 
     if (result >= 0) {
         if (!bytesRead) {
             return 0;
         }
 
-    /*  TODO: If this fails, try last argument as 1 */
-        result = MCP_UnknownStuff(path, request->pos + fileoffset, msg->ioctl.buffer_io, msg->ioctl.length_io, msg->ioctl.length_io, 0);
-        log("MCP_UnknownStuff returned %d\n", result);
+        /*  TODO: If this fails, try last argument as 1 */
+        result = MCP_UnknownStuff(filepath, pos + fileoffset, buffer_out, buffer_len, buffer_len, 0);
+        //log("MCP_UnknownStuff returned %d\n", result);
 
         if (result >= 0) {
-            if(filesize > 0 && (bytesRead + request->pos > filesize)){
-                return filesize - request->pos;
+            if(filesize > 0 && (bytesRead + pos > filesize)) {
+                return filesize - pos;
             }
             return bytesRead;
         }
@@ -206,29 +166,86 @@ static int MCP_LoadCustomFile(char* path, ipcmessage* msg, MCPLoadFileRequest* r
     return result;
 }
 
+
 /*  RPX replacement! Call this ioctl to replace the next loaded RPX with an arbitrary path.
     DO NOT RETURN 0, this affects the codepaths back in the IOSU code */
 int _MCP_ioctl100_patch(ipcmessage* msg) {
-/*  Give some method to detect this ioctl's prescence, even if the other args are bad */
+    /*  Give some method to detect this ioctl's prescence, even if the other args are bad */
     if (msg->ioctl.buffer_io && msg->ioctl.length_io >= sizeof(u32)) {
         *(u32*)msg->ioctl.buffer_io = 1;
     }
 
     FAIL_ON(!msg->ioctl.buffer_in, 0);
     FAIL_ON(!msg->ioctl.length_in, 0);
-    FAIL_ON(msg->ioctl.length_in > sizeof(rpxpath) - 1, msg->ioctl.length_in);
-    
-    memset(rpxpath,0,sizeof(rpxpath));
-    strncpy(rpxpath, (const char*)msg->ioctl.buffer_in, msg->ioctl.length_in);
-    //rpxpath[strlen(rpxpath)] = '\0';
 
-    didrpxfirstchunk = false;
+    if(msg->ioctl.buffer_in && msg->ioctl.length_in >= 4) {
+        int command = msg->ioctl.buffer_in[0];
 
-    log("Will load %s for next title\n", rpxpath);
+        switch(command) {
+        case IPC_CUSTOM_LOG_STRING: {
+            //DEBUG_FUNCTION_LINE("IPC_CUSTOM_LOG_STRING\n");
+            if(msg->ioctl.length_in > 4) {
+                char * str_ptr = (char * ) &msg->ioctl.buffer_in[0x04 / 0x04];
+                str_ptr[msg->ioctl.length_in - 0x04 - 1] = 0;
+                log_printf("%s",str_ptr);
+            }
+            return 1;
+        }
+        case IPC_CUSTOM_META_XML_SWAP_REQUIRED: {
+            //DEBUG_FUNCTION_LINE("IPC_CUSTOM_META_XML_SWAP_REQUIRED\n");
+            /*if(doWantReplaceXML) {
+                msg->ioctl.buffer_io[0] = 10;
+            } else {
+                msg->ioctl.buffer_io[0] = 11;
+            }
+            return 1;*/
+        }
+        case IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED: {
+            DEBUG_FUNCTION_LINE("IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED\n");
+            skipPPCSetup = true;
+            return 1;
+        }
+        case IPC_CUSTOM_META_XML_READ: {
+            if(msg->ioctl.length_io >= sizeof(ACPMetaXml)) {
+                DEBUG_FUNCTION_LINE("IPC_CUSTOM_META_XML_READ\n");
+                ACPMetaXml * app_ptr = (ACPMetaXml*) msg->ioctl.buffer_io;
+                strncpy(app_ptr->longname_en, rpxpath, 256 - 1);
+                strncpy(app_ptr->shortname_en, rpxpath, 256 - 1);
+            }
+            return 1;
+        }
+        case IPC_CUSTOM_LOAD_CUSTOM_RPX: {
+            DEBUG_FUNCTION_LINE("IPC_CUSTOM_LOAD_CUSTOM_RPX\n");
 
-/*  Signal that all went well */
+            if(msg->ioctl.length_in >= 0x110) {
+                int target = msg->ioctl.buffer_in[0x04/0x04];
+                int filesize = msg->ioctl.buffer_in[0x08/0x04];
+                int fileoffset = msg->ioctl.buffer_in[0x0C/0x04];
+                char * str_ptr = (char * ) &msg->ioctl.buffer_in[0x10 / 0x04];
+                memset(rpxpath,0,sizeof(rpxpath));
+
+                strncpy(rpxpath, str_ptr, 256 - 1);
+
+                rep_filesize = filesize;
+                rep_fileoffset = fileoffset;
+                didrpxfirstchunk = false;
+                doWantReplaceRPX = true;
+                //doWantReplaceXML = true;
+
+                DEBUG_FUNCTION_LINE("Will load %s for next title from target: %d (offset %d, filesize %d)\n", rpxpath, target,rep_fileoffset,rep_filesize);
+            }
+            return 1;
+        }
+        default: {
+        }
+        }
+    } else {
+        return -29;
+    }
+
+    /*  Signal that all went well */
     if (msg->ioctl.buffer_io && msg->ioctl.length_io >= sizeof(u32)) {
-        *(u32*)msg->ioctl.buffer_io = 2;
+        msg->ioctl.buffer_io[0] = 2;
     }
     return 1;
 }

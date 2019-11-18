@@ -14,7 +14,7 @@ int _startMainThread(void)
     if(threadsStarted == 0)
     {
         threadsStarted = 1;
-        
+
         wupserver_init();
         ipc_init();
     }

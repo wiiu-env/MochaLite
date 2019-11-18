@@ -27,6 +27,7 @@
 #include "instant_patches.h"
 
 #define USB_PHYS_CODE_BASE      0x101312D0
+
 typedef struct
 {
     u32 size;
@@ -83,15 +84,15 @@ int _main()
 
 	void * pusb_root_thread = (void*)0x10100174;
 	kernel_memcpy(pusb_root_thread, (void*)repairData_usb_root_thread, sizeof(repairData_usb_root_thread));
-    
+
     payload_info_t *payloads = (payload_info_t*)0x00148000;
-
 	kernel_memcpy((void*)USB_PHYS_CODE_BASE, payloads->data, payloads->size);
-    payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );  
 
+
+    payloads = (payload_info_t*)0x00160000;
 	kernel_memcpy((void*)mcp_get_phys_code_base(), payloads->data, payloads->size);
-	payloads = (payload_info_t*)( ((char*)payloads) + ALIGN4(sizeof(payload_info_t) + payloads->size) );
-    
+
+
     // run all instant patches as necessary
     instant_patches_setup();
 
