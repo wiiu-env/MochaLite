@@ -25,6 +25,7 @@
 #include "../../common/kernel_commands.h"
 #include "elf_patcher.h"
 #include "ios_mcp_patches.h"
+#include "ios_acp_patches.h"
 #include "kernel_patches.h"
 #include "exception_handler.h"
 #include "fsa.h"
@@ -95,7 +96,8 @@ void kernel_launch_ios(u32 launch_address, u32 L, u32 C, u32 H)
 
         //! try to keep the order of virt. addresses to reduce the memmove amount
         mcp_run_patches(ios_elf_start);
-        kernel_run_patches(ios_elf_start);   
+        kernel_run_patches(ios_elf_start);
+        acp_run_patches(ios_elf_start);
 
         restore_mmu(control_register);
         enable_interrupts(level);

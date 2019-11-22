@@ -44,7 +44,7 @@ void mcp_run_patches(u32 ios_elf_start)
     section_write(ios_elf_start, _text_start, (void*)mcp_get_phys_code_base(), _text_end - _text_start);
 
     section_write_word(ios_elf_start, 0x05056718, ARM_BL(0x05056718, _text_start));
-    
+
     section_write_word(ios_elf_start, 0x05002BBE, THUMB_BL(0x05002BBE, patch_SD_access_check));
 
     u32 patch_count = (u32)(((u8*)mcp_patches_table_end) - ((u8*)mcp_patches_table)) / sizeof(patch_table_t);
@@ -52,9 +52,21 @@ void mcp_run_patches(u32 ios_elf_start)
 
     section_write_word(ios_elf_start, 0x050254D6, THUMB_BL(0x050254D6, MCP_LoadFile_patch));
     section_write_word(ios_elf_start, 0x05025242, THUMB_BL(0x05025242, MCP_ioctl100_patch));
+    //section_write_word(ios_elf_start, 0x05025412, THUMB_BL(0x05025412, MCP_0x51_mcpSwitchTitle));
+    //section_write_word(ios_elf_start, 0x0502543e, THUMB_BL(0x0502543e, MCP_0x49_0x52_PrepareTitle)); // IOCTL 0x49
+    //section_write_word(ios_elf_start, 0x05025428, THUMB_BL(0x05025428, MCP_0x49_0x52_PrepareTitle)); // IOCTL 0x52
+    //section_write_word(ios_elf_start, 0x05028448, THUMB_BL(0x05028448, MCP_ioctl_proccess));
+    //section_write_word(ios_elf_start, 0x0501dd78, THUMB_BL(0x0501dd78, MCP_ReadCOSXml_patch));
+    //section_write_word(ios_elf_start, 0x051105ce, THUMB_BL(0x051105ce, MCP_ReadCOSXml_patch));
+    //section_write_word(ios_elf_start, 0x05101e3c, THUMB_BL(0x05101e3c, MCP_ReadAPPXml_patch));
+    //section_write_word(ios_elf_start, 0x0502b994, THUMB_BL(0x0502b994, MCP_ReadAPPXml_patch));
+    //section_write_word(ios_elf_start, 0x0502ba56, THUMB_BL(0x0502ba56, MCP_ReadAPPXml_patch));
+
+    //section_write_word(ios_elf_start, 0x05002520, THUMB_BL(0x05002520, MCP_ReadCOSXml2_patch));
 
     // patch MCP syslogs
     //section_write_word(ios_elf_start, 0x05055438, ARM_B(0x05055438, 0x0503DCF8));
     //section_write_word(ios_elf_start, 0x05056C2C, ARM_B(0x05056C2C, 0x0503DCF8));
     //section_write_word(ios_elf_start, 0x0500A4D2, THUMB_BL(0x0500A4D2, mcpThumb2ArmLog));
+
 }

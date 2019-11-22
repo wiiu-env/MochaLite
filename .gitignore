@@ -32,3 +32,5 @@
 /ios_acp/*.elf
 /ios_acp/ios_acp_syms.h
 *.rpx
+MochaLite.cscope_file_list
+MochaLite.layout

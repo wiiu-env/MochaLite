@@ -120,7 +120,7 @@ $(BUILD): $(CURDIR)/ios_kernel/ios_kernel.bin.h
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
-$(CURDIR)/ios_kernel/ios_kernel.bin.h: $(CURDIR)/ios_usb/ios_usb.bin.h $(CURDIR)/ios_mcp/ios_mcp.bin.h
+$(CURDIR)/ios_kernel/ios_kernel.bin.h: $(CURDIR)/ios_usb/ios_usb.bin.h $(CURDIR)/ios_mcp/ios_mcp.bin.h  $(CURDIR)/ios_acp/ios_acp.bin.h
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_kernel -f  $(CURDIR)/ios_kernel/Makefile
 
 $(CURDIR)/ios_usb/ios_usb.bin.h:
@@ -128,6 +128,9 @@ $(CURDIR)/ios_usb/ios_usb.bin.h:
 
 $(CURDIR)/ios_mcp/ios_mcp.bin.h:
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_mcp -f  $(CURDIR)/ios_mcp/Makefile
+    
+$(CURDIR)/ios_acp/ios_acp.bin.h:
+	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_acp -f  $(CURDIR)/ios_acp/Makefile
 
 #---------------------------------------------------------------------------------
 clean:
@@ -136,6 +139,7 @@ clean:
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_kernel -f  $(CURDIR)/ios_kernel/Makefile clean
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_usb -f  $(CURDIR)/ios_usb/Makefile clean
 	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_mcp -f  $(CURDIR)/ios_mcp/Makefile clean
+	@$(MAKE) --no-print-directory -C $(CURDIR)/ios_acp -f  $(CURDIR)/ios_acp/Makefile clean
 
 
 #---------------------------------------------------------------------------------

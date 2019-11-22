@@ -30,7 +30,9 @@ int (*const MCP_UnknownStuff)(const char* path, uint32_t pos, void* outputBuffer
 static int MCP_LoadCustomFile(int target, char* path, int filesize, int fileoffset, void * out_buffer, int buffer_len, int pos);
 static bool skipPPCSetup = false;
 static bool didrpxfirstchunk = false;
+static bool doWantReplaceXML = false;
 static bool doWantReplaceRPX = false;
+static bool skipNextCOSReplacement = false;
 static bool replace_target_device = 0;
 static bool rep_filesize = 0;
 static bool rep_fileoffset = 0;
@@ -86,7 +88,7 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
         if(!doWantReplaceRPX) {
             replace_path = "wiiu/apps/homebrew_launcher/homebrew_launcher.rpx";
             replace_target = LOAD_FILE_TARGET_SD_CARD;
-            //doWantReplaceXML = false;
+            doWantReplaceXML = false;
             doWantReplaceRPX = true;
             replace_filesize = 0; // unknown
             replace_fileoffset = 0;
@@ -105,6 +107,7 @@ int _MCP_LoadFile_patch(ipcmessage* msg) {
                 return result;
             } else {
                 // TODO, what happens if we already replaced the app/cos xml files and then the loading fails?
+                doWantReplaceXML = false; //if loading failed disabled meta loading.
             }
         }
     }
@@ -167,6 +170,93 @@ static int MCP_LoadCustomFile(int target, char* path, int filesize, int fileoffs
 }
 
 
+int _MCP_0x51_mcpSwitchTitle(ipcmessage* msg) {
+    int (*const real_0x51_mcpSwitchTitle)(ipcmessage* msg) = (void*)0x0501ce18 + 1; //+1 for thumb
+    if(msg->ioctl.buffer_in != NULL) {
+        if(msg->ioctl.length_in >= 0x74 + 0x08) {
+            uint64_t titleId = *((uint64_t*)&(msg->ioctl.buffer_in[0x74/0x04]));
+            //DEBUG_FUNCTION_LINE("Starting: %016llX\n",titleId);
+            if(titleId == 0x0005001010040200L || titleId == 0x0005001010040000L || titleId == 0x0005001010040100L) {
+                DEBUG_FUNCTION_LINE("Starting Wii U Menu, we don't replace XML files anymore.\n");
+                doWantReplaceXML = false;
+            }
+        }
+    }
+
+    int res = real_0x51_mcpSwitchTitle(msg);
+    return res;
+}
+
+int _MCP_ReadCOSXml_patch(uint32_t u1, uint32_t u2, MCPPPrepareTitleInfo * xmlData) {
+    int (*const real_MCP_ReadCOSXml_patch)(uint32_t u1, uint32_t u2, MCPPPrepareTitleInfo * xmlData) = (void*)0x050024ec + 1; //+1 for thumb
+
+    int res = real_MCP_ReadCOSXml_patch(u1,u2,xmlData);
+
+
+        if(doWantReplaceXML) {
+            DEBUG_FUNCTION_LINE("We would replace COS xml\n");
+        } else {
+            DEBUG_FUNCTION_LINE("We would NOT replace COS xml\n");
+        }
+
+
+    return res;
+}
+
+
+// 0x52 is calling the function with type = 1
+// 0x49 is calling the function with type = 0
+int _MCP_0x49_0x52_PrepareTitle(ipcmessage * ipc, uint32_t type) {
+    int (*const real_MCP_0x49_PrepareTitle)(ipcmessage * ipc, uint32_t type) = (void*)0x0501d9ec + 1; //+1 for thumb
+
+
+    int res = real_MCP_0x49_PrepareTitle(ipc,type);
+
+
+        if(doWantReplaceXML) {
+            DEBUG_FUNCTION_LINE("We would replace APP xml %d\n",type);
+        } else {
+            DEBUG_FUNCTION_LINE("We would NOT replace APP xml %d\n",type);
+        }
+
+
+    return res;
+}
+
+int _MCP_ioctl_proccess(ipcmessage * ipc) {
+    int (*const real_MCP_ioctl_proccess)(ipcmessage * ipc) = (void*)0x05024bf0 + 1; //+1 for thumb
+    int cmd = ipc->ioctl.command;
+    if(cmd!= 0x64 && cmd != 0x4C && cmd != 0x58) {
+        DEBUG_FUNCTION_LINE("Calling IOCTL_%04X \n", ipc->ioctl.command);
+    }
+    int res = real_MCP_ioctl_proccess(ipc);
+    if(cmd!= 0x64 && cmd != 0x4C && cmd != 0x58) {
+        DEBUG_FUNCTION_LINE("Calling IOCTL_%04X done \n", ipc->ioctl.command);
+    }
+
+    return res;
+}
+
+int _MCP_ReadAPPXml_patch(uint32_t u1,uint32_t u2,uint32_t u3) {
+    int (*const real_MCP_ReadAPPXml_patch)(uint32_t u1,uint32_t u2,uint32_t u3) = (void*)0x050021bc + 1; //+1 for thumb
+
+    //DEBUG_FUNCTION_LINE("%08X %08X %08X\n",u1,u2,u3);
+
+    int res = real_MCP_ReadAPPXml_patch(u1,u2,u3);
+    if(u3 != NULL) {
+        //dumpHex(u3, 0x100);
+    }
+
+    if(doWantReplaceXML) {
+        DEBUG_FUNCTION_LINE("We would replace APP xml\n");
+    } else {
+        DEBUG_FUNCTION_LINE("We would NOT replace APP xml\n");
+    }
+
+    return res;
+}
+
+
 /*  RPX replacement! Call this ioctl to replace the next loaded RPX with an arbitrary path.
     DO NOT RETURN 0, this affects the codepaths back in the IOSU code */
 int _MCP_ioctl100_patch(ipcmessage* msg) {
@@ -193,12 +283,12 @@ int _MCP_ioctl100_patch(ipcmessage* msg) {
         }
         case IPC_CUSTOM_META_XML_SWAP_REQUIRED: {
             //DEBUG_FUNCTION_LINE("IPC_CUSTOM_META_XML_SWAP_REQUIRED\n");
-            /*if(doWantReplaceXML) {
+            if(doWantReplaceXML) {
                 msg->ioctl.buffer_io[0] = 10;
             } else {
                 msg->ioctl.buffer_io[0] = 11;
             }
-            return 1;*/
+            return 1;
         }
         case IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED: {
             DEBUG_FUNCTION_LINE("IPC_CUSTOM_MEN_RPX_HOOK_COMPLETED\n");
@@ -230,7 +320,7 @@ int _MCP_ioctl100_patch(ipcmessage* msg) {
                 rep_fileoffset = fileoffset;
                 didrpxfirstchunk = false;
                 doWantReplaceRPX = true;
-                //doWantReplaceXML = true;
+                doWantReplaceXML = true;
 
                 DEBUG_FUNCTION_LINE("Will load %s for next title from target: %d (offset %d, filesize %d)\n", rpxpath, target,rep_fileoffset,rep_filesize);
             }
