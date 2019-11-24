@@ -32,8 +32,8 @@ static bool skipPPCSetup = false;
 static bool didrpxfirstchunk = false;
 static bool doWantReplaceRPX = false;
 static bool replace_target_device = 0;
-static bool rep_filesize = 0;
-static bool rep_fileoffset = 0;
+static uint32_t rep_filesize = 0;
+static uint32_t rep_fileoffset = 0;
 static char rpxpath[256];
 
 #define log(fmt, ...) log_printf("%s: " fmt, __FUNCTION__, __VA_ARGS__)
